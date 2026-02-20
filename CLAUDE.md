@@ -180,6 +180,8 @@ The **Gateway** is a long-running HTTP/WebSocket server (default port 18789) tha
 - Accepts connections from channel adapters (Telegram, WhatsApp, etc.)
 - Maintains sessions and routes messages to AI providers
 - Exposes a Control UI (Lit web components) and REST/WS API
+- Exposes an **OpenAI-compatible HTTP API** (`/v1/chat/completions`, Open Responses API) so standard OpenAI clients can connect
+- Supports **mDNS/Bonjour** discovery (`@homebridge/ciao`) for local network access
 - Can run as a daemon (launchd on macOS, systemd on Linux)
 
 ### Channels
@@ -190,9 +192,10 @@ Channels are message source/sink adapters. Each channel has:
 
 Core channels live in `src/<channel-name>/`.
 Extension channels live in `extensions/<channel-name>/`.
+All channels implement the typed adapter interfaces in `src/plugin-sdk/index.ts` (e.g. `ChannelMessagingAdapter`, `ChannelAuthAdapter`, `ChannelGatewayAdapter`).
 
 ### Sessions
-Sessions track conversation context. Session keys determine routing continuity (same session = same conversation thread). Overrides (model, send policy) are applied per-session.
+Sessions track conversation context. Session keys determine routing continuity (same session = same conversation thread). Session data is stored as JSONL in `~/.openclaw/sessions/*.jsonl`. Overrides (model, send policy) are applied per-session.
 
 ### Plugins
 Plugins extend gateway behavior. They register via `src/plugins/` and can add commands, hooks, routes, and scheduled tasks.
@@ -204,7 +207,13 @@ External plugins import from `openclaw/plugin-sdk` (path alias resolved via jiti
 Hooks fire at lifecycle points (before agent start, after response, etc.). Configured in gateway config; the runner is `src/gateway/hooks.ts`.
 
 ### Auth Profiles
-Multiple auth credentials can be configured (Anthropic, OpenAI, etc.) with automatic rotation and failover. Profile logic lives in `src/agents/auth-profiles/`.
+Multiple auth credentials can be configured (Anthropic, OpenAI, Gemini, Bedrock, Ollama, OpenRouter, GitHub Copilot, Qwen, Minimax, vLLM, and others) with automatic round-robin rotation and failover. Profile logic lives in `src/agents/auth-profiles/`.
+
+### Skills
+The `skills/` directory contains ~50 bundled agent skill directories (GitHub, Slack, Notion, Spotify, weather, Peekaboo, etc.) that can be installed and managed by the agent runtime via `openclaw onboard` or individually.
+
+### Dependency Injection
+Commands accept a `deps` object created by `createDefaultDeps()` rather than importing singletons directly. This pattern keeps units testable without heavy mocking.
 
 ---
 
@@ -354,13 +363,30 @@ Mobile build commands in `package.json`: `ios:build`, `ios:run`, `android:assemb
 | `croner` | Cron scheduling |
 | `@mariozechner/pi-*` | Pi agent core / TUI |
 | `@agentclientprotocol/sdk` | ACP (Agent Client Protocol) SDK |
+| `sqlite-vec` | SQLite vector store for semantic memory |
+| `@aws-sdk/client-bedrock` | AWS Bedrock AI provider |
+| `@homebridge/ciao` | mDNS/Bonjour for local network discovery |
+
+---
+
+## Storage & Data Patterns
+
+- **Config:** JSON files in `~/.openclaw/` (path configurable via `OPENCLAW_STATE_DIR`)
+- **Sessions:** JSONL files in `~/.openclaw/sessions/*.jsonl`
+- **Vector memory:** SQLite + `sqlite-vec` for embeddings/semantic memory search
+- **Credentials:** stored at `~/.openclaw/credentials/`; re-run `openclaw login` if logged out
+- **Config schema:** Zod-validated; versioned migrations in `src/config/legacy.migrations.*.ts`
 
 ---
 
 ## CI / Release
 
-- Versions follow calendar versioning: `vYYYY.M.D`
+- Versions follow calendar versioning: `vYYYY.M.D` (current: `2026.2.16`)
 - Release channels: `stable` (latest), `beta` (prerelease), `dev` (main HEAD)
+- CI runs on Blacksmith runners (`blacksmith-4vcpu-ubuntu-2404`), `macos-latest`, and `blacksmith-4vcpu-windows-2025`
+- CI detects docs-only changes to skip heavy build/test jobs
+- Pre-commit hooks (via `.pre-commit-config.yaml`) mirror CI checks: trailing whitespace, secrets detection, shellcheck, actionlint, zizmor, oxlint, oxfmt, swiftlint/swiftformat
+- Protocol schema must stay in sync: `pnpm protocol:check` validates `dist/protocol.schema.json` and the generated Swift models in `apps/macos/Sources/OpenClawProtocol/`
 - Before any release: read `docs/reference/RELEASING.md` and `docs/platforms/mac/release.md`
 - Release check: `pnpm release:check`
 
